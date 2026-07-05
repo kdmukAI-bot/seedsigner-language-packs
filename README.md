@@ -56,11 +56,13 @@ git submodule update --init            # fetch the .po source
 scripts/build_packs.sh                 # all locales -> build/
 scripts/build_packs.sh --locale hi --locale th   # a subset
 scripts/build_packs.sh --catalogs-only # just recompile .mo (fast; translations change often)
+scripts/build_packs.sh --skip-if-built # no-op if the out-dir already has packs (bootstrap)
 REBUILD_IMAGE=1 scripts/build_packs.sh # force a clean image rebuild
 ```
 
 Output is **unsigned** and lands in `build/` (gitignored). Dev consumers rebuild on
-the fly; nothing here signs or commits automatically.
+the fly; nothing here signs or commits automatically. `--skip-if-built` lets a consumer
+"build-on-first-use, else skip" — bootstrap the packs once, then it's free (no Docker).
 
 ## Reproducibility (the linchpin)
 

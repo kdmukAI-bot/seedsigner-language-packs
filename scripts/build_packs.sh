@@ -11,14 +11,41 @@
 #   scripts/build_packs.sh --out-dir /tmp/packs     # custom output dir
 #   scripts/build_packs.sh --locale hi --locale th  # subset (args pass to build_fontpacks.py)
 #   scripts/build_packs.sh --catalogs-only          # just recompile .mo catalogs
+#   scripts/build_packs.sh --skip-if-built           # no-op if the out-dir already has packs
 #   REBUILD_IMAGE=1 scripts/build_packs.sh          # force `docker build --no-cache`
 #
-# All arguments are forwarded verbatim to tools/build_fontpacks.py.
+# All arguments EXCEPT --skip-if-built are forwarded verbatim to tools/build_fontpacks.py.
+# --skip-if-built is a build_packs.sh-level guard: it makes the whole thing a no-op when the
+# output dir is already populated, so consumers can safely "build-on-first-use, else skip"
+# (bootstrap the packs once, then this is free on subsequent runs — no Docker needed).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 IMAGE="${IMAGE:-seedsigner-langpack-builder:latest}"
+
+# Split our own --skip-if-built out of the args forwarded to build_fontpacks.py, and track
+# the effective --out-dir so the guard knows what to check (mirrors build_fontpacks.py's
+# default of <repo>/build; a relative --out-dir resolves under the repo root == the /work mount).
+SKIP_IF_BUILT=0
+OUT_DIR="$REPO_ROOT/build"
+FWD_ARGS=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --skip-if-built)  SKIP_IF_BUILT=1; shift ;;
+    --out-dir)        OUT_DIR="$2"; FWD_ARGS+=("$1" "$2"); shift 2 ;;
+    --out-dir=*)      OUT_DIR="${1#--out-dir=}"; FWD_ARGS+=("$1"); shift ;;
+    *)                FWD_ARGS+=("$1"); shift ;;
+  esac
+done
+case "$OUT_DIR" in /*) : ;; *) OUT_DIR="$REPO_ROOT/$OUT_DIR" ;; esac
+
+# --skip-if-built: idempotent bootstrap. If the output already holds packs, do nothing
+# (before the submodule check + Docker build, so a warm checkout needs neither).
+if [ "$SKIP_IF_BUILT" = 1 ] && [ -n "$(ls -A "$OUT_DIR" 2>/dev/null)" ]; then
+  echo "==> --skip-if-built: $OUT_DIR already populated; skipping build."
+  exit 0
+fi
 
 # The .po source is a submodule; a bare checkout has an empty dir.
 if [ ! -e "$REPO_ROOT/seedsigner-translations/l10n" ]; then
@@ -40,7 +67,7 @@ docker run --rm \
   -u "$(id -u):$(id -g)" \
   -e HOME=/tmp \
   "$IMAGE" \
-  python3 tools/build_fontpacks.py "$@"
+  python3 tools/build_fontpacks.py "${FWD_ARGS[@]}"
 
 echo ""
 echo "==> Done. Unsigned packs are in the build output dir (default: build/)."
