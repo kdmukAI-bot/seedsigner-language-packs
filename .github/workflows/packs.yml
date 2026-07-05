@@ -1,0 +1,59 @@
+# Reproducibility + parity CI for the language packs.
+#
+# CI NEVER signs and NEVER commits (the signing key is offline, never in CI). It
+# only proves the build is deterministic and complete:
+#   1. determinism  — build the packs TWICE in the pinned Docker image, diff byte-
+#                     for-byte. If it flaps, the build is not reproducible → don't ship.
+#   2. parity       — every locale declared in locales.h has a matching built pack.
+#   3. reader parity— locales_h.py parses locales.h into the expected policy.
+# Least privilege: read-only token, no write scopes anywhere (mirrors the ecosystem's
+# fork-PR-forced-read-only posture).
+name: packs
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  reproducible-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          submodules: recursive
+
+      - name: Reader parity (locales.h -> policy)
+        run: |
+          python3 tools/locales_h.py > /tmp/policy.json
+          python3 - <<'PY'
+          import json
+          p = json.load(open("/tmp/policy.json"))
+          n = len(p["manifest_locales"])
+          assert n >= 1, "locales.h parsed no locales"
+          print(f"locales_h.py parsed {n} locale(s):", ", ".join(sorted(p["manifest_locales"])))
+          PY
+
+      - name: Build packs (run 1)
+        run: scripts/build_packs.sh --out-dir build/run1
+
+      - name: Build packs (run 2)
+        run: scripts/build_packs.sh --out-dir build/run2
+
+      - name: Determinism gate (byte-identical)
+        run: |
+          if diff -rq build/run1 build/run2; then
+            echo "DETERMINISM OK: two builds are byte-identical."
+          else
+            echo "DETERMINISM FAIL: builds differ (see above). Not reproducible." >&2
+            exit 1
+          fi
+
+      - name: Parity gate (every locales.h locale has a pack)
+        run: python3 scripts/check_parity.py --out-dir build/run1

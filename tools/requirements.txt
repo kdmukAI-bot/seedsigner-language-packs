@@ -1,0 +1,31 @@
+# Offline i18n shaping/subsetting tooling for the LVGL screens.
+#
+# Pinned for reproducibility: the offline HarfBuzz pre-shaping step bakes glyph
+# IDs and GPOS offsets into signed packs, so a shaper bump is a *reviewed
+# re-shaping event* (see docs/complex-script-shaping-spike-plan.md). The
+# uharfbuzz wheel bundles its own libharfbuzz, which pins the shaping engine
+# independent of any system HarfBuzz.
+#
+#   uharfbuzz 0.55.0  ->  bundled libharfbuzz 14.2.1
+#
+# fontTools provides pyftsubset (subset-then-shape) and TTFont introspection.
+# Pillow (with the bundled libraqm layout engine) both renders the pre-rendered
+# endonym images that ship in each pack AND the reference oracle PNGs the glyph-run
+# render is diffed against; NumPy backs the ink-IoU comparator in validate_runs.py.
+# Pillow is PINNED exactly here (unlike in the screens repo, where it was a loose
+# dep already present): its version determines the endonym image bytes, so it is a
+# reproducibility input. NumPy touches only the oracle comparison, not pack bytes,
+# but is pinned too for a fully reproducible image.
+#
+# PyICU exposes ICU's dictionary-aware line BreakIterator, which finds real WORD
+# boundaries in the no-space scripts (Thai/Lao/Khmer/Burmese) for on-device line
+# wrapping. The word dictionary lives in the SYSTEM libicu (not the wheel), so the
+# boundaries depend on the system ICU version — recorded as `icu_version` in each
+# pack manifest so an ICU bump is a reviewed re-segmentation event, like a
+# HarfBuzz bump. Build needs libicu-dev present.
+
+uharfbuzz==0.55.0
+fonttools==4.57.0
+PyICU==2.16.2
+Pillow==11.1.0
+numpy==2.2.4

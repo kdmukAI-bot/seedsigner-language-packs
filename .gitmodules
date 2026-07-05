@@ -1,0 +1,4 @@
+[submodule "seedsigner-translations"]
+	path = seedsigner-translations
+	url = https://github.com/kdmukAI-bot/seedsigner-translations.git
+	branch = lvgl-screens-stubs

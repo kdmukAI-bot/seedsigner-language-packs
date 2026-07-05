@@ -1,0 +1,11 @@
+# On-the-fly UNSIGNED pack build output. NEVER committed — only SIGNED release
+# packs live in signed-packs/ (placed manually by the offline signer). Dev builds
+# and CI produce packs here and throw them away.
+/build/
+
+# lv_shape oracle build tree (rebuilt on demand inside the Docker image).
+/tools/shaper/build/
+
+# Python bytecode.
+__pycache__/
+*.pyc
