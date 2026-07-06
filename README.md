@@ -20,9 +20,14 @@ seedsigner-language-packs/
 ├── tools/                    # the producer: build_fontpacks.py + Dockerfile + shaper/…
 ├── scripts/                  # build_packs.sh (docker wrapper) + parity/verify helpers
 ├── seedsigner-translations/  # submodule — .po catalogs (pinned)
-├── signed-packs/<locale>/    # THE DELIVERABLE — signed release packs (committed by hand)
+├── signed-packs/             # future signed-release home — EMPTY until signing lands (§ Signing)
 └── build/                    # gitignored — on-the-fly UNSIGNED build output
 ```
+
+> **Nothing built is ever committed** (dev or signed-yet). Reproducibility comes from pinned
+> inputs + the determinism gate, not from committed blobs. In **local dev this checkout is the
+> source of truth**: build straight into the app with
+> `scripts/build_packs.sh --out-dir "$SS_APP_DIR/src/lang-packs"` (see below).
 
 ## What a pack is
 
@@ -49,20 +54,40 @@ Locale → pack contents is decided entirely by `locales.h` policy + the `.po` s
 
 ## Build packs (dev)
 
-Everything runs inside the pinned Docker image, so you need only Docker + git.
+`scripts/build_packs.sh` runs the builder inside the pinned toolchain image, which it **pulls
+from GHCR** by default (`ghcr.io/kdmukai-bot/seedsigner-langpack-builder`) — no reinstalling the
+shaping stack each run. If the image can't be pulled (not published yet / offline / air-gapped
+signer) it **falls back to a local `docker build` of `tools/`**. Docker gives byte-identical,
+reproducible output; it is **optional in local dev** only in the sense that you can instead run
+the builder natively (`python3 tools/build_fontpacks.py …`) if you already have the shaping
+toolchain installed. Reproducible/signed builds require the image.
 
 ```sh
-git submodule update --init            # fetch the .po source
-scripts/build_packs.sh                 # all locales -> build/
+git submodule update --init            # fetch the .po source (pinned)
+scripts/build_packs.sh                 # all locales -> $SS_APP_DIR/src/lang-packs, else build/
+scripts/build_packs.sh --out-dir "$SS_APP_DIR/src/lang-packs"   # explicit local-dev push into the app
 scripts/build_packs.sh --locale hi --locale th   # a subset
 scripts/build_packs.sh --catalogs-only # just recompile .mo (fast; translations change often)
-scripts/build_packs.sh --skip-if-built # no-op if the out-dir already has packs (bootstrap)
-REBUILD_IMAGE=1 scripts/build_packs.sh # force a clean image rebuild
+scripts/build_packs.sh --skip-if-built # no-op if the out-dir already has packs
+REBUILD_IMAGE=1 scripts/build_packs.sh # force a clean local `docker build --no-cache`
+LOCAL_IMAGE=1   scripts/build_packs.sh # build tools/ locally instead of pulling GHCR
 ```
 
-Output is **unsigned** and lands in `build/` (gitignored). Dev consumers rebuild on
-the fly; nothing here signs or commits automatically. `--skip-if-built` lets a consumer
-"build-on-first-use, else skip" — bootstrap the packs once, then it's free (no Docker).
+Output is **unsigned** and lands in `--out-dir`. When you don't pass `--out-dir` it defaults to
+**`$SS_APP_DIR/src/lang-packs`** (when `SS_APP_DIR` is set) so **this checkout is the single
+source of truth** — build here → the app runtime, the app's language tests, and the device
+deployers (which read the app's `src/lang-packs`) all see it at once. With no `SS_APP_DIR` it
+falls back to the gitignored `build/`. Different translation state? Check out a different ref in
+the `seedsigner-translations` submodule and rebuild.
+
+### Publishing the toolchain image (manual)
+
+The image is published **manually** from the pinned `tools/Dockerfile` via the
+`publish-builder-image` workflow (Actions → *Run workflow*) — the one place with `packages:write`.
+It tags `:latest` + the commit SHA and prints the pushed **digest** to the run summary. Pin that
+digest in `BUILDER_IMAGE` (`scripts/build_packs.sh`) and in the screens/app CI so every consumer
+rebuilds against the exact environment. **CI** (this repo's + screens' + the app's) pulls the
+image rather than reinstalling the shaping stack each run.
 
 ## Reproducibility (the linchpin)
 
@@ -113,28 +138,41 @@ The intended flow, once the scheme is chosen:
    (keyless content integrity); (b) verify the signature over that hash (authenticity).
    On-device, the secure bootloader does (b) via the `ss_pack_provider` chokepoint.
 
-## Delivery (copy step)
+## Delivery
 
-Consumers **copy** `signed-packs/<locale>/` into their runtime path — they never build
-or submodule the screens toolchain:
+**Local dev (the common case):** this checkout builds *into the app* —
+`build_packs.sh --out-dir "$SS_APP_DIR/src/lang-packs"`. Every consumer then reads the app's
+`src/lang-packs`:
 
-- **seedsigner (app):** copy → `src/lang-packs` (gitignored, staged; zero app-code change).
-- **Pi (raspi-lvgl):** copy → `src/lang-packs` beside the `.so` (drops the old workstation
-  path + device symlink).
-- **ESP32 (micropython-builder):** `sd_format_push.py` sources packs here (submodule) and
-  stages them onto the microSD.
+- **seedsigner (app):** reads `src/lang-packs` (gitignored, zero app-code change). It does **not**
+  submodule or build packs — this checkout pushes into it.
+- **Pi (raspi-lvgl)** and **ESP32 (micropython-builder):** their deploy scripts point only at the
+  **app** (`SS_APP_DIR`) and copy `$SS_APP_DIR/src/lang-packs` to the device. They know nothing
+  about this repo. Absent packs = a valid **English-only** deploy.
 
-The pinned version is the git ref / release tag. Dev rebuilds on the fly.
+**Production (deferred):** once signing lands, consumers obtain **signed** packs at a release tag
+and land them in the same `src/lang-packs` — signed-vs-dev is invisible downstream because the
+*location* is the contract.
+
+## Self-describing packs (policy travels in the manifest)
+
+Each pack's `manifest.json` carries **everything the render layer needs at runtime** —
+`chain`, `rtl`, `shaping`, and (via `chain`) per-role sizing — plus endonym/catalog/sha256s.
+The render layer (screens) is migrating to read this per-pack instead of a vendored copy of
+`locales.h`, so **adding or changing a locale needs no screens recompile** — drop the pack, the
+host discovers it. Keep the manifest complete for every locale; it is the render-time contract.
 
 ## Adding / changing a locale
 
 1. Edit `locales.h` (add an `SS_LOCALE(...)` row; add the source TTF to `fonts/` if new).
-2. `scripts/build_packs.sh --locale <new>` and eyeball `build/<new>/`.
+2. `scripts/build_packs.sh --locale <new>` and eyeball the built `<new>/` pack in the out-dir
+   (confirm `manifest.json` carries the policy fields).
 3. Re-sign + release (per cadence).
-4. Downstream: re-vendor `locales.h` into the screens repo if policy changed, and bump
-   the pack pin in each consumer.
+4. Downstream: **nothing** once the manifest-driven migration lands (the host discovers the new
+   pack from its manifest — no screens recompile, no re-vendor). During the migration, screens
+   still vendors a transitional copy of `locales.h`; re-vendor it if policy changed.
 
-`locales.h` is the **single source of truth** for locale→font policy — one file the C
-render layer `#include`s and this repo's Python reader parses, with no codegen. It
-replaced `screenshot_gen --dump-locales`; the reader is verified against that dump's
-historical output.
+`locales.h` is the **single source of truth** for locale→font policy — this repo's C `lv_shape`
+oracle `#include`s it and `tools/locales_h.py` parses it (no codegen). It replaced
+`screenshot_gen --dump-locales`; the reader is verified against that dump's historical output.
+The builder stamps this policy into each pack's `manifest.json`, which is what consumers read.

@@ -1,0 +1,67 @@
+# Publish the pinned pack-builder toolchain image to GHCR.
+#
+# This is the ONE workflow in this repo that needs a write scope (packages: write),
+# so it is MANUAL-only (workflow_dispatch) — the image is published deliberately, from
+# the pinned tools/Dockerfile, when the toolchain (base-image digest / requirements.txt /
+# LVGL SHA) changes. Every other workflow (packs.yml) stays read-only.
+#
+# The image is the build ENVIRONMENT only — it bakes NO translations or pack content.
+# Consumers (this repo's packs.yml, plus the screens + app CI) PULL it to rebuild packs
+# without reinstalling the shaping stack, and pin it by DIGEST (printed to the job summary
+# below; paste it into BUILDER_IMAGE in scripts/build_packs.sh and the consumer workflows).
+name: publish-builder-image
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      - name: Resolve image ref (GHCR requires a lowercase owner)
+        id: ref
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          echo "image=ghcr.io/${owner}/seedsigner-langpack-builder" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build the toolchain image
+        env:
+          IMAGE: ${{ steps.ref.outputs.image }}
+        run: |
+          # Tag with both :latest and the commit SHA so a given publish is traceable
+          # to the exact tools/Dockerfile + requirements.txt it was built from.
+          docker build -t "${IMAGE}:latest" -t "${IMAGE}:${GITHUB_SHA}" tools
+
+      - name: Push
+        env:
+          IMAGE: ${{ steps.ref.outputs.image }}
+        run: |
+          docker push "${IMAGE}:latest"
+          docker push "${IMAGE}:${GITHUB_SHA}"
+
+      - name: Report the pinned digest
+        env:
+          IMAGE: ${{ steps.ref.outputs.image }}
+        run: |
+          # RepoDigests is populated after the push; this is the digest consumers pin.
+          digest="$(docker inspect --format='{{index .RepoDigests 0}}' "${IMAGE}:latest")"
+          {
+            echo "### Pack-builder image published"
+            echo ""
+            echo "Pin this digest in \`scripts/build_packs.sh\` (\`BUILDER_IMAGE\`) and in the"
+            echo "screens + app CI workflows:"
+            echo ""
+            echo '```'
+            echo "${digest}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -6,6 +6,10 @@
 #                     for-byte. If it flaps, the build is not reproducible → don't ship.
 #   2. parity       — every locale declared in locales.h has a matching built pack.
 #   3. reader parity— locales_h.py parses locales.h into the expected policy.
+# The pinned pack-builder image is PULLED from GHCR (public — anonymous pull, no login
+# or write scope needed); build_packs.sh falls back to a local `docker build` of tools/
+# if the image can't be pulled (e.g. not published yet). Publishing the image is a
+# separate MANUAL workflow (publish-builder-image.yml) — the only place with packages:write.
 # Least privilege: read-only token, no write scopes anywhere (mirrors the ecosystem's
 # fork-PR-forced-read-only posture).
 name: packs
