@@ -41,10 +41,10 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # The pinned GHCR toolchain image: the build ENVIRONMENT only (ubuntu + fontTools /
 # uharfbuzz / PyICU / Pillow + the pinned-LVGL lv_shape oracle). It bakes NO translations
 # or pack content. Published manually from tools/Dockerfile via the publish-builder-image
-# workflow; pin it by DIGEST here once published (ghcr.io/…@sha256:…) so consumers rebuild
-# against an exact environment. Until then the :latest tag resolves, and the local-build
-# fallback below covers a pull miss.
-BUILDER_IMAGE="${BUILDER_IMAGE:-ghcr.io/kdmukai-bot/seedsigner-langpack-builder:latest}"
+# workflow, which prints the pushed digest; it is pinned by DIGEST below so consumers rebuild
+# against an exact environment (re-pin after each publish). The local-build fallback still
+# covers a pull miss (offline / air-gapped signer). The image is public — anonymous pull.
+BUILDER_IMAGE="${BUILDER_IMAGE:-ghcr.io/kdmukai-bot/seedsigner-langpack-builder@sha256:3a3f1b97821f326a8b7eb1c13e7df889f4146d879f1b03b0581099d74b0bc6fb}"
 IMAGE="${IMAGE:-$BUILDER_IMAGE}"
 
 # ----------------------------------------------------------------------------
