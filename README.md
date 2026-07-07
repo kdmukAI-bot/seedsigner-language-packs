@@ -55,9 +55,10 @@ Locale → pack contents is decided entirely by `locales.h` policy + the `.po` s
 ## Build packs (dev)
 
 `scripts/build_packs.sh` runs the builder inside the pinned toolchain image, which it **pulls
-from GHCR** by default (`ghcr.io/kdmukai-bot/seedsigner-langpack-builder`) — no reinstalling the
-shaping stack each run. If the image can't be pulled (not published yet / offline / air-gapped
-signer) it **falls back to a local `docker build` of `tools/`**. Docker gives byte-identical,
+from GHCR** by default — the **public**, **digest-pinned** `ghcr.io/kdmukai-bot/seedsigner-langpack-builder`
+(the digest is pinned in `BUILDER_IMAGE`) — so there's no reinstalling the shaping stack each run.
+If the image can't be pulled (offline / air-gapped signer) it **falls back to a local `docker build`
+of `tools/`**. Docker gives byte-identical,
 reproducible output; it is **optional in local dev** only in the sense that you can instead run
 the builder natively (`python3 tools/build_fontpacks.py …`) if you already have the shaping
 toolchain installed. Reproducible/signed builds require the image.
@@ -88,6 +89,10 @@ It tags `:latest` + the commit SHA and prints the pushed **digest** to the run s
 digest in `BUILDER_IMAGE` (`scripts/build_packs.sh`) and in the screens/app CI so every consumer
 rebuilds against the exact environment. **CI** (this repo's + screens' + the app's) pulls the
 image rather than reinstalling the shaping stack each run.
+
+The image is **currently published and public**, and `BUILDER_IMAGE` pins its digest. Re-run the
+workflow and re-pin the new digest only when the toolchain changes (`tools/Dockerfile` or
+`tools/requirements.txt`).
 
 ## Reproducibility (the linchpin)
 
